@@ -336,27 +336,31 @@ private:
         }
     };
 
-    static vector<ParentPackageStub> initParentStubs(core::GlobalState &gs) {
-        vector<ParentPackageStub> stubs;
+    struct ImportStubs {
+        std::vector<ParentPackageStub> parents;
 
-        auto &db = gs.packageDB();
+        static ImportStubs make(core::GlobalState &gs) {
+            ImportStubs stubs;
 
-        for (auto parent : gs.singlePackageImports->parentImports) {
-            auto &info = db.getPackageInfo(parent);
+            auto &db = gs.packageDB();
 
-            auto &stub = stubs.emplace_back();
-            stub.packageId = parent;
-            stub.fullName = info.fullName();
+            for (auto parent : gs.singlePackageImports->parentImports) {
+                auto &info = db.getPackageInfo(parent);
 
-            auto exportPaths = info.exports();
-            auto prefixLen = info.fullName().size();
-            for (auto &path : exportPaths) {
-                stub.exports.emplace_back(path[prefixLen]);
+                auto &stub = stubs.parents.emplace_back();
+                stub.packageId = parent;
+                stub.fullName = info.fullName();
+
+                auto exportPaths = info.exports();
+                auto prefixLen = info.fullName().size();
+                for (auto &path : exportPaths) {
+                    stub.exports.emplace_back(path[prefixLen]);
+                }
             }
-        }
 
-        return stubs;
-    }
+            return stubs;
+        }
+    };
 
     static void ensureTGenericMixin(core::GlobalState &gs, core::ClassOrModuleRef klass) {
         auto &mixins = klass.data(gs)->mixins();
@@ -365,8 +369,8 @@ private:
         }
     }
 
-    static void stubForRbiGeneration(core::MutableContext ctx, const vector<ParentPackageStub> &parentPackageStubs,
-                                     const Nesting *scope, ast::ConstantLit *out, bool possibleGenericType) {
+    static void stubForRbiGeneration(core::MutableContext ctx, const ImportStubs &importStubs, const Nesting *scope,
+                                     ast::ConstantLit *out, bool possibleGenericType) {
         if (out->symbol.exists()) {
             // In single-package RBI generation mode, we might have already
             // resolved a class that we later identified as generic, and
@@ -389,7 +393,7 @@ private:
         if (auto *origScope = ast::cast_tree<ast::ConstantLit>(original.scope)) {
             // The scope of the original is not a possible generic type.
             const bool isGenericType = false;
-            stubForRbiGeneration(ctx, parentPackageStubs, scope, origScope, isGenericType);
+            stubForRbiGeneration(ctx, importStubs, scope, origScope, isGenericType);
             owner = origScope->symbol.asClassOrModuleRef();
         } else {
             for (auto *cursor = scope; cursor != nullptr; cursor = cursor->parent.get()) {
@@ -401,8 +405,8 @@ private:
                 auto name = sym.data(ctx)->name;
 
                 const auto parent =
-                    absl::c_find_if(parentPackageStubs, [name](auto &stub) { return stub.fullName.back() == name; });
-                if (parent == parentPackageStubs.end()) {
+                    absl::c_find_if(importStubs.parents, [name](auto &stub) { return stub.fullName.back() == name; });
+                if (parent == importStubs.parents.end()) {
                     continue;
                 }
 
@@ -438,8 +442,8 @@ private:
     }
 
     // We have failed to resolve the constant. We'll need to report the error and stub it so that we can proceed
-    static void constantResolutionFailed(core::MutableContext ctx, ResolutionItem &job,
-                                         const vector<ParentPackageStub> &parentPackageStubs, int &suggestionCount) {
+    static void constantResolutionFailed(core::MutableContext ctx, ResolutionItem &job, const ImportStubs &importStubs,
+                                         int &suggestionCount) {
         auto &original = ast::cast_tree_nonnull<ast::UnresolvedConstantLit>(job.out->original);
 
         bool singlePackageRbiGeneration = ctx.state.singlePackageImports.has_value();
@@ -474,7 +478,7 @@ private:
 
         // When generating rbis in single-package mode, we may need to invent a symbol at this point
         if (singlePackageRbiGeneration) {
-            stubForRbiGeneration(ctx.withOwner(job.scope->scope), parentPackageStubs, job.scope.get(), job.out,
+            stubForRbiGeneration(ctx.withOwner(job.scope->scope), importStubs, job.scope.get(), job.out,
                                  job.possibleGenericType);
             return;
         }
@@ -1591,10 +1595,10 @@ public:
             Timer timeit(gs.tracer(), "resolver.resolve_constants.errors");
 
             // Initialize the stubbed parent namespaces if we're generating an interface for a single package
-            vector<ParentPackageStub> parentPackageStubs;
+            ImportStubs importStubs;
             bool singlePackageRbiGeneration = gs.singlePackageImports.has_value();
             if (singlePackageRbiGeneration) {
-                parentPackageStubs = initParentStubs(gs);
+                importStubs = ImportStubs::make(gs);
             }
 
             // Only give suggestions for the first several constants, because fuzzy suggestions are expensive.
@@ -1602,7 +1606,7 @@ public:
             for (auto &job : todo) {
                 core::MutableContext ctx(gs, core::Symbols::root(), job.file);
                 for (auto &item : job.items) {
-                    constantResolutionFailed(ctx, item, parentPackageStubs, suggestionCount);
+                    constantResolutionFailed(ctx, item, importStubs, suggestionCount);
                 }
             }
 
