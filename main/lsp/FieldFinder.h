@@ -7,21 +7,14 @@
 namespace sorbet::realmain::lsp {
 
 class FieldFinder {
-public:
-    struct Field {
-        core::NameRef name;
-        ast::UnresolvedIdent::Kind kind;
-    };
-
 private:
     core::Loc queryLoc;
     ast::UnresolvedIdent::Kind queryKind;
 
-    // We go through the effort of keeping track of a method stack so as to not rely on trees having been
-    // flattened at this point. (LSP code should try to make minimal assumptions to be robust to changes.)
-    std::vector<core::MethodRef> methodStack;
+    const core::ClassOrModuleRef targetClass;
+    bool insideSurroundingClass = false;
 
-    std::vector<Field> result_;
+    std::vector<core::NameRef> result_;
 
 public:
     FieldFinder(core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind);
@@ -32,7 +25,7 @@ public:
     ast::ExpressionPtr preTransformClassDef(core::Context ctx, ast::ExpressionPtr classDef);
     ast::ExpressionPtr postTransformClassDef(core::Context ctx, ast::ExpressionPtr classDef);
 
-    const std::vector<Field> &result() const;
+    const std::vector<core::NameRef> &result() const;
 };
 }; // namespace sorbet::realmain::lsp
 

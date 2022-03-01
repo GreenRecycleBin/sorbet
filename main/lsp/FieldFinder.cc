@@ -13,7 +13,9 @@ FieldFinder::FieldFinder(core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKin
 }
 
 ast::ExpressionPtr FieldFinder::postTransformUnresolvedIdent(core::Context ctx, ast::ExpressionPtr tree) {
-    ENFORCE(!methodStack.empty());
+    if (!this->insideSurroundingClass) {
+        return tree;
+    }
 
     auto &ident = ast::cast_tree_nonnull<ast::UnresolvedIdent>(tree);
 
@@ -21,32 +23,29 @@ ast::ExpressionPtr FieldFinder::postTransformUnresolvedIdent(core::Context ctx, 
         return tree;
     }
 
-    this->result_.emplace_back(Field{ident.name, ident.kind});
-    return tree;
-}
-
-ast::ExpressionPtr FieldFinder::preTransformMethodDef(core::Context ctx, ast::ExpressionPtr tree) {
-    auto &methodDef = ast::cast_tree_nonnull<ast::MethodDef>(tree);
-
-    ENFORCE(methodDef.symbol.exists());
-    ENFORCE(methodDef.symbol != core::Symbols::todoMethod());
-
-    return tree;
-}
-
-ast::ExpressionPtr FieldFinder::postTransformMethodDef(core::Context ctx, ast::ExpressionPtr tree) {
+    this->result_.emplace_back(ident.name);
     return tree;
 }
 
 ast::ExpressionPtr FieldFinder::preTransformClassDef(core::Context ctx, ast::ExpressionPtr tree) {
+    auto &classDef = ast::cast_tree_nonnull<ast::ClassDef>(tree);
+
+    ENFORCE(classDef.symbol.exists());
+    ENFORCE(classDef.symbol != core::Symbols::todo());
+
+    if (classDef.symbol == this->targetClass) {
+        this->insideSurroundingClass = true;
+    }
+
     return tree;
 }
 
 ast::ExpressionPtr FieldFinder::postTransformClassDef(core::Context ctx, ast::ExpressionPtr tree) {
+    this->insideSurroundingClass = false;
     return tree;
 }
 
-const vector<FieldFinder::Field> &FieldFinder::result() const {
+const vector<core::NameRef> &FieldFinder::result() const {
     return this->result_;
 }
 
