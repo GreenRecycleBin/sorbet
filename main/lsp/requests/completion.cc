@@ -734,6 +734,24 @@ vector<unique_ptr<CompletionItem>> allSimilarConstantItems(const core::GlobalSta
     return items;
 }
 
+string_view identPrefix(string_view name) {
+    if (name.size() >= 2 && absl::StartsWith(name, "@@")) {
+        return "@@";
+    }
+
+    if (name.size() >= 1) {
+        if (absl::StartsWith(name, "@")) {
+            return "@";
+        }
+
+        if (absl::StartsWith(name, "$")) {
+            return "$";
+        }
+    }
+
+    return "";
+}
+
 } // namespace
 
 CompletionTask::CompletionTask(const LSPConfiguration &config, MessageId id, unique_ptr<CompletionParams> params)
@@ -819,11 +837,13 @@ CompletionTask::SearchParams CompletionTask::searchParamsForEmptyAssign(const co
                                                                         core::MethodRef enclosingMethod,
                                                                         core::lsp::ConstantResponse::Scopes scopes) {
     auto prefix = "";
+    auto identPrefix = "";
     // Create a fake DispatchResult to get method results
     auto suggestKeywords = true;
     return SearchParams{
         queryLoc,
         prefix,
+        identPrefix,
         methodSearchParamsForEmptyAssign(gs, enclosingMethod),
         suggestKeywords,
         enclosingMethod, // locals
@@ -985,6 +1005,7 @@ unique_ptr<ResponseMessage> CompletionTask::runRequest(LSPTypecheckerDelegate &t
             //   puts
             // which parses as a method call (A.puts()) instead of a constant.
 
+            string_view identPrefix{""};
             auto scopes = core::lsp::ConstantResponse::Scopes{};
             // We're ignoring the other dispatch components here, because the fact that we saw `::`
             // in the source means that it's likely a constant lit, not something with a fancy type.
@@ -998,6 +1019,7 @@ unique_ptr<ResponseMessage> CompletionTask::runRequest(LSPTypecheckerDelegate &t
             auto params = SearchParams{
                 queryLoc,
                 prefix,
+                identPrefix,
                 nullopt,           // do not suggest methods
                 false,             // do not suggest keywords
                 core::MethodRef{}, // do not suggest locals
@@ -1008,8 +1030,9 @@ unique_ptr<ResponseMessage> CompletionTask::runRequest(LSPTypecheckerDelegate &t
             // isPrivateOk means that there is no syntactic receiver. This check prevents completing `x.de` to `x.def`
             // (If there is a method whose name overlaps with a keyword, it will still show up as a _method_ item.)
             auto suggestKeywords = sendResp->isPrivateOk;
+            string_view identPrefix{""};
             auto params = SearchParams{
-                queryLoc, prefix,
+                queryLoc, prefix, identPrefix,
                 MethodSearchParams{
                     sendResp->dispatchResult,
                     sendResp->totalArgs,
@@ -1045,10 +1068,11 @@ unique_ptr<ResponseMessage> CompletionTask::runRequest(LSPTypecheckerDelegate &t
                 }
             }
             auto methodSearchParams = nullopt;
+            string_view identPrefix{""};
             auto suggestKeywords = false;
             auto enclosingMethod = core::MethodRef{};
             params = SearchParams{
-                queryLoc, prefix, methodSearchParams, suggestKeywords, enclosingMethod, std::move(constantResp->scopes),
+                queryLoc, prefix, identPrefix, methodSearchParams, suggestKeywords, enclosingMethod, std::move(constantResp->scopes),
             };
         }
         items = this->getCompletionItems(typechecker, params);
@@ -1062,9 +1086,11 @@ unique_ptr<ResponseMessage> CompletionTask::runRequest(LSPTypecheckerDelegate &t
             // Cursor at end of variable name
             auto suggestKeywords = true;
             auto prefix = varName;
+            auto identPfx = identPrefix(varName);
             auto params = SearchParams{
                 queryLoc,
                 prefix,
+                identPfx,
                 methodSearchParamsForEmptyAssign(gs, identResp->enclosingMethod),
                 suggestKeywords,
                 identResp->enclosingMethod,

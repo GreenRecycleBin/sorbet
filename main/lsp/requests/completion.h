@@ -25,6 +25,9 @@ class CompletionTask final : public LSPRequestTask {
         // Might be ""
         std::string_view prefix;
 
+        // "" for local variables, "@"/"@@"/"$" otherwise.
+        std::string_view identPrefix;
+
         // If nullopt, won't suggest methods.
         std::optional<MethodSearchParams> forMethods;
 
