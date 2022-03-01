@@ -338,26 +338,32 @@ private:
             return absl::c_find(this->exports, candidate) != this->exports.end();
         }
 
-        // Check that a symbol matches the full name of this parent package.
-        bool matchesOwners(const core::GlobalState &gs, core::ClassOrModuleRef sym) const {
-            for (auto it = this->fullName.rbegin(); it != this->fullName.rend(); ++it) {
-                if (!sym.exists()) {
-                    return false;
-                }
+        bool couldDefineNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
+                                  const std::vector<ast::ConstantLit *> &suffix) const {
 
-                if (sym.data(gs)->name != *it) {
-                    return false;
-                }
-
-                auto owner = sym.data(gs)->owner;
-                if (!owner.isClassOrModule()) {
-                    return false;
-                }
-
-                sym = owner.asClassOrModuleRef();
+            if (this->fullName.size() < prefix.size()) {
+                return false;
             }
 
-            return sym == core::Symbols::root();
+            if (!std::equal(prefix.begin(), prefix.end(), this->fullName.begin())) {
+                return false;
+            }
+
+            auto it = this->fullName.begin() + prefix.size();
+            for (auto *cnst : suffix) {
+                if (it == this->fullName.end()) {
+                    return true;
+                }
+
+                auto &original = ast::cast_tree_nonnull<ast::UnresolvedConstantLit>(cnst->original);
+                if (original.cnst != *it) {
+                    return false;
+                }
+
+                ++it;
+            }
+
+            return true;
         }
 
         bool operator<(const PackageStub &other) const {
@@ -367,6 +373,7 @@ private:
     };
 
     struct ImportStubs {
+        std::vector<PackageStub> parents;
         std::vector<PackageStub> imports;
 
         static ImportStubs make(core::GlobalState &gs) {
@@ -376,9 +383,15 @@ private:
 
             for (auto parent : gs.singlePackageImports->parentImports) {
                 auto &info = db.getPackageInfo(parent);
-                stubs.imports.emplace_back(PackageStub::parentImport(info));
+                stubs.parents.emplace_back(PackageStub::parentImport(info));
             }
 
+            for (auto parent : gs.singlePackageImports->regularImports) {
+                auto &info = db.getPackageInfo(parent);
+                stubs.imports.emplace_back(PackageStub::regularImport(info));
+            }
+
+            fast_sort(stubs.parents);
             fast_sort(stubs.imports);
 
             return stubs;
@@ -386,31 +399,18 @@ private:
 
         // Determine if a package with the same name as `scope` is known to export the name `cnst`. Returns `scope` as a
         // ClassOrModuleRef if the package rooted at that point could export `cnst`.
-        core::ClassOrModuleRef packageExportsConstant(const core::GlobalState &gs, core::SymbolRef scope,
-                                                      core::NameRef cnst) const {
-            if (!scope.isClassOrModule()) {
-                return core::ClassOrModuleRef{};
-            }
-
-            auto sym = scope.asClassOrModuleRef();
-
-            const auto parent =
-                absl::c_find_if(this->imports, [&gs, sym](auto &stub) { return stub.matchesOwners(gs, sym); });
-
-            if (parent == this->imports.end() || !parent->exportsSymbol(cnst) || !parent->matchesOwners(gs, sym)) {
-                return core::ClassOrModuleRef{};
-            }
-
-            return sym;
+        bool packageExportsConstant(const std::vector<core::NameRef> &scope, core::NameRef cnst) const {
+            const auto parent = absl::c_find_if(this->parents, [&scope](auto &stub) { return stub.fullName == scope; });
+            return parent != this->parents.end() && parent->exportsSymbol(cnst);
         }
 
         // Determine if a package is known to have a prefix that is a combination of the name defined by `scope`, and
         // some prefix of the suffix vector provided. Returns `scope` as a ClassOrModuleRef if such an import exists.
-        core::ClassOrModuleRef packageDefinesNamespace(const core::GlobalState &gs, core::SymbolRef scope,
-                const std::vector<ast::ConstantLit *> &suffix) const {
-
-
-            return core::ClassOrModuleRef{};
+        bool packageDefinesNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
+                                     const std::vector<ast::ConstantLit *> &suffix) const {
+            return absl::c_any_of(this->imports, [&gs, &prefix, &suffix](auto &stub) {
+                return stub.couldDefineNamespace(gs, prefix, suffix);
+            });
         }
     };
 
@@ -450,15 +450,41 @@ private:
         stubConstant(ctx, owner, *last, possibleGenericType);
     }
 
+    static bool scopeToNames(core::GlobalState &gs, core::SymbolRef sym, std::vector<core::NameRef> &res) {
+        res.clear();
+        while (sym.exists() && sym != core::Symbols::root()) {
+            if (!sym.isClassOrModule()) {
+                res.clear();
+                return false;
+            }
+
+            auto cls = sym.asClassOrModuleRef();
+            res.emplace_back(cls.data(gs)->name);
+            sym = cls.data(gs)->owner;
+        }
+
+        absl::c_reverse(res);
+
+        return true;
+    }
+
     // Determine if a parent package exports a constant named `base`. If it does, return the symbol from the nesting
     // scope that
     static core::ClassOrModuleRef parentPackageOwner(core::MutableContext ctx, const ImportStubs &importStubs,
                                                      const Nesting *scope, ast::ConstantLit *base) {
+        std::vector<core::NameRef> prefix;
+        prefix.reserve(5);
+
         for (auto *cursor = scope; cursor != nullptr; cursor = cursor->parent.get()) {
+            // TODO: if this is expensive, we could cache it in stubForRbiGeneration below
+            if (!scopeToNames(ctx, cursor->scope, prefix)) {
+                continue;
+            }
+
             auto &original = ast::cast_tree_nonnull<ast::UnresolvedConstantLit>(base->original);
-            auto sym = importStubs.packageExportsConstant(ctx, cursor->scope, original.cnst);
-            if (sym.exists()) {
-                return sym;
+            if (importStubs.packageExportsConstant(prefix, original.cnst)) {
+                ENFORCE(cursor->scope.isClassOrModule());
+                return cursor->scope.asClassOrModuleRef();
             }
         }
 
@@ -468,10 +494,18 @@ private:
     // Determine if a child class shares a name in suffix, potentially rooted in any of the nesting scopes.
     static core::ClassOrModuleRef childPackageOwner(core::MutableContext ctx, const ImportStubs &importStubs,
                                                     const Nesting *scope, std::vector<ast::ConstantLit *> suffix) {
+        std::vector<core::NameRef> prefix;
+        prefix.reserve(5);
+
         for (auto *cursor = scope; cursor != nullptr; cursor = cursor->parent.get()) {
-            auto sym = importStubs.packageDefinesNamespace(ctx, cursor->scope, suffix);
-            if (sym.exists()) {
-                return sym;
+            // TODO: if this is expensive, we could cache it in stubForRbiGeneration below
+            if (!scopeToNames(ctx, cursor->scope, prefix)) {
+                continue;
+            }
+
+            if (importStubs.packageDefinesNamespace(ctx, prefix, suffix)) {
+                ENFORCE(cursor->scope.isClassOrModule());
+                return cursor->scope.asClassOrModuleRef();
             }
         }
 
