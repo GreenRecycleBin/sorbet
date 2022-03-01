@@ -20,8 +20,6 @@ public:
     FieldFinder(core::ClassOrModuleRef target, core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind);
 
     ast::ExpressionPtr postTransformUnresolvedIdent(core::Context ctx, ast::ExpressionPtr ident);
-    ast::ExpressionPtr preTransformMethodDef(core::Context ctx, ast::ExpressionPtr methodDef);
-    ast::ExpressionPtr postTransformMethodDef(core::Context ctx, ast::ExpressionPtr methodDef);
     ast::ExpressionPtr preTransformClassDef(core::Context ctx, ast::ExpressionPtr classDef);
     ast::ExpressionPtr postTransformClassDef(core::Context ctx, ast::ExpressionPtr classDef);
 
