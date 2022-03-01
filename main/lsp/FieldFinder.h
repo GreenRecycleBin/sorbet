@@ -8,16 +8,16 @@ namespace sorbet::realmain::lsp {
 
 class FieldFinder {
 private:
+    const core::ClassOrModuleRef targetClass;
     core::Loc queryLoc;
     ast::UnresolvedIdent::Kind queryKind;
 
-    const core::ClassOrModuleRef targetClass;
     bool insideSurroundingClass = false;
 
     std::vector<core::NameRef> result_;
 
 public:
-    FieldFinder(core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind);
+    FieldFinder(core::ClassOrModuleRef target, core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind);
 
     ast::ExpressionPtr postTransformUnresolvedIdent(core::Context ctx, ast::ExpressionPtr ident);
     ast::ExpressionPtr preTransformMethodDef(core::Context ctx, ast::ExpressionPtr methodDef);
