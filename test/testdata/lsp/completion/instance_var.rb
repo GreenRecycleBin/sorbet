@@ -7,6 +7,7 @@ class InstanceVariable
   end
 
   def other_method
+    my = 5
     @my
     #  ^ completion: @my_ivar
   end
