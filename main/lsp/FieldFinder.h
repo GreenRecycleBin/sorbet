@@ -1,5 +1,5 @@
-#ifndef RUBY_TYPER_LSP_LOCALVARFINDER_H
-#define RUBY_TYPER_LSP_LOCALVARFINDER_H
+#ifndef RUBY_TYPER_LSP_FIELDFINDER_H
+#define RUBY_TYPER_LSP_FIELDFINDER_H
 
 #include "ast/ast.h"
 #include <vector>
@@ -29,4 +29,4 @@ public:
 };
 }; // namespace sorbet::realmain::lsp
 
-#endif // RUBY_TYPER_LSP_LOCALVARFINDER_H
+#endif // RUBY_TYPER_LSP_FIELDFINDER_H
