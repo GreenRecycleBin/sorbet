@@ -338,10 +338,15 @@ private:
             return absl::c_find(this->exports, candidate) != this->exports.end();
         }
 
-        bool couldDefineNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
-                                  const std::vector<ast::ConstantLit *> &suffix) const {
+        bool couldDefineChildNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
+                                       const std::vector<ast::ConstantLit *> &suffix) const {
+            // This check is only valid for regular exports.
+            ENFORCE(this->exports.empty());
 
-            if (this->fullName.size() < prefix.size()) {
+            // The reasoning is as follows: the prefix is derived from a nesting scope paired with the symbol being
+            // resolved. The nesting scopes could only define a package in the parent namespace, while this check is
+            // only applied to packages that are known to not occupy that part of the namespace.
+            if (this->fullName.size() <= prefix.size()) {
                 return false;
             }
 
@@ -406,10 +411,10 @@ private:
 
         // Determine if a package is known to have a prefix that is a combination of the name defined by `scope`, and
         // some prefix of the suffix vector provided. Returns `scope` as a ClassOrModuleRef if such an import exists.
-        bool packageDefinesNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
+        bool fromChildNamespace(const core::GlobalState &gs, const std::vector<core::NameRef> &prefix,
                                      const std::vector<ast::ConstantLit *> &suffix) const {
             return absl::c_any_of(this->imports, [&gs, &prefix, &suffix](auto &stub) {
-                return stub.couldDefineNamespace(gs, prefix, suffix);
+                return stub.couldDefineChildNamespace(gs, prefix, suffix);
             });
         }
     };
@@ -503,7 +508,7 @@ private:
                 continue;
             }
 
-            if (importStubs.packageDefinesNamespace(ctx, prefix, suffix)) {
+            if (importStubs.fromChildNamespace(ctx, prefix, suffix)) {
                 ENFORCE(cursor->scope.isClassOrModule());
                 return cursor->scope.asClassOrModuleRef();
             }
