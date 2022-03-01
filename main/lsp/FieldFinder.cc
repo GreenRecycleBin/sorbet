@@ -6,12 +6,18 @@ using namespace std;
 
 namespace sorbet::realmain::lsp {
 
+FieldFinder::FieldFinder(core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind)
+    : queryLoc(queryLoc), queryKind(queryKind)
+{
+    ENFORCE(queryKind != ast::UnresolvedIdent::Kind::Local);
+}
+
 ast::ExpressionPtr FieldFinder::postTransformUnresolvedIdent(core::Context ctx, ast::ExpressionPtr tree) {
     ENFORCE(!methodStack.empty());
 
     auto &ident = ast::cast_tree_nonnull<ast::UnresolvedIdent>(tree);
 
-    if (ident.kind == ast::UnresolvedIdent::Kind::Local) {
+    if (ident.kind != this->queryKind) {
         return tree;
     }
 

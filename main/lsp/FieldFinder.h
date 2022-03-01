@@ -15,6 +15,7 @@ public:
 
 private:
     core::Loc queryLoc;
+    ast::UnresolvedIdent::Kind queryKind;
 
     // We go through the effort of keeping track of a method stack so as to not rely on trees having been
     // flattened at this point. (LSP code should try to make minimal assumptions to be robust to changes.)
@@ -23,7 +24,7 @@ private:
     std::vector<Field> result_;
 
 public:
-    FieldFinder(core::Loc queryLoc) : queryLoc(queryLoc) {}
+    FieldFinder(core::Loc queryLoc, ast::UnresolvedIdent::Kind queryKind);
 
     ast::ExpressionPtr postTransformUnresolvedIdent(core::Context ctx, ast::ExpressionPtr ident);
     ast::ExpressionPtr preTransformMethodDef(core::Context ctx, ast::ExpressionPtr methodDef);
